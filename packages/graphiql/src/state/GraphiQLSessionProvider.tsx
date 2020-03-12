@@ -9,11 +9,11 @@ import {
 import getQueryFacts from '../utility/getQueryFacts';
 
 import { GraphQLParams, SessionState, EditorContexts } from './types';
-import { SchemaState } from './GraphiQLSchemaProvider';
 
 import { defaultFetcher } from './common';
 import { SchemaContext } from './GraphiQLSchemaProvider';
 import { GraphQLSchema } from 'graphql';
+import { Fetcher } from 'src/components/GraphiQL';
 
 export const actionTypes = generateActionTypeMap([
   'editor_loaded',
@@ -80,46 +80,44 @@ export const SessionContext = React.createContext<
 export const useSessionContext = (): SessionState & SessionHandlers =>
   React.useContext(SessionContext);
 
-export function sessionReducer(
-  state: SessionState & SchemaState,
-  { type: actionType, payload }: ActionState,
-) {
-  switch (actionType) {
-    case actionTypes.editor_loaded: {
-      state.editors[payload.context as EditorContexts] = payload.editor;
-      return state;
+export function getSessionReducer(schema: GraphQLSchema) {
+  return (state: SessionState, { type: actionType, payload }: ActionState) => {
+    switch (actionType) {
+      case actionTypes.editor_loaded: {
+        state.editors[payload.context as EditorContexts] = payload.editor;
+        return state;
+      }
+      case actionTypes.operation_changed: {
+        state.operation.text = payload;
+        return {
+          ...state,
+          ...getQueryFacts(schema as GraphQLSchema, state.operation.text),
+        };
+      }
+      case actionTypes.variables_changed: {
+        state.variables.text = payload;
+        return state;
+      }
+      case actionTypes.operation_succeeded: {
+        state.results.text = payload;
+        state.results.formattedText = JSON.stringify(payload, null, 2);
+        state.operationErrors = null;
+        return state;
+      }
+      case actionTypes.operation_errored: {
+        state.operationErrors = [payload];
+        return state;
+      }
+      default: {
+        return state;
+      }
     }
-    case actionTypes.operation_changed: {
-      state.operation.text = payload;
-      return {
-        ...state,
-        ...getQueryFacts(state.schema as GraphQLSchema, state.operation.text),
-      };
-    }
-    case actionTypes.variables_changed: {
-      state.variables.text = payload;
-      return state;
-    }
-    case actionTypes.operation_succeeded: {
-      state.results.text = payload;
-      state.results.json = JSON.parse(payload);
-      state.results.formattedText = JSON.stringify(state.results.json, null, 2);
-      state.operationErrors = null;
-      return state;
-    }
-    case actionTypes.operation_errored: {
-      state.operationErrors = [payload];
-      return state;
-    }
-    default: {
-      return state;
-    }
-  }
+  };
 }
 
 export type SessionProviderProps = {
   sessionId: number;
-  fetcher?: typeof defaultFetcher;
+  fetcher?: Fetcher;
   session?: SessionState;
   children: any;
 };
@@ -132,13 +130,9 @@ export function SessionProvider({
 }: SessionProviderProps) {
   const schemaState = React.useContext(SchemaContext);
 
-  const [state, dispatch] = useReducers<
-    SessionState & SchemaState,
-    AT,
-    ActionState
-  >({
-    reducers: [sessionReducer],
-    init: () => ({ ...initialState, ...schemaState }),
+  const [state, dispatch] = useReducers<SessionState, AT, ActionState>({
+    reducers: [getSessionReducer(schemaState.schema as GraphQLSchema)],
+    init: () => initialState,
   });
 
   const operationError = (error: Error) =>
